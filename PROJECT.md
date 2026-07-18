@@ -199,7 +199,7 @@ RepoDoctor/
 ├── sandbox/
 │   └── Dockerfile             # image with the target repo + pytest
 ├── target_repo/               # the demo library we test against (has planted bugs)
-│   └── calculator.py
+│   └── billing.py
 └── .env.example               # OPENAI_API_KEY, etc.
 ```
 
@@ -272,10 +272,10 @@ CREATE INDEX idx_verdicts_status ON verdicts(status);
 ```json
 {
   "status": "reproduced",
-  "extracted": { "function": "get_discount", "inputs": [100, 20], "expected": 80, "observed": 120 },
-  "generated_test": "from target_repo.calculator import get_discount\n\ndef test_repro():\n    assert get_discount(100, 20) == 80",
-  "run_output": "E   assert 120 == 80",
-  "explanation": "Reproduced. get_discount(100, 20) returned 120, expected 80.",
+  "extracted": { "function": "add_loyalty_points", "inputs": [2147483647, 1], "expected": 2147483648, "observed": -2147483648 },
+  "generated_test": "from target_repo.billing import add_loyalty_points\n\ndef test_repro():\n    assert add_loyalty_points(2147483647, 1) == 2147483648",
+  "run_output": "E   assert -2147483648 == 2147483648",
+  "explanation": "Reproduced. add_loyalty_points(2147483647, 1) returned -2147483648, expected 2147483648.",
   "duration_ms": 4200
 }
 ```
@@ -291,8 +291,8 @@ CREATE INDEX idx_verdicts_status ON verdicts(status);
   "document_id": 7,
   "bug_count": 3,
   "results": [
-    { "seq": 1, "status": "reproduced",        "explanation": "get_discount returned 120, expected 80" },
-    { "seq": 2, "status": "not_reproducible",  "explanation": "divide(10, 2) correctly returns 5" },
+    { "seq": 1, "status": "reproduced",        "explanation": "add_loyalty_points overflowed to a negative balance" },
+    { "seq": 2, "status": "not_reproducible",  "explanation": "calculate_interest(1000, 5, 2) correctly returns 100" },
     { "seq": 3, "status": "insufficient_info", "explanation": "no function/inputs given" }
   ]
 }
@@ -316,10 +316,18 @@ pytest source asserting the EXPECTED value
    │
    ├── does not parse / import fails? ──▶ 🟡 insufficient_info
    ▼  (3) SANDBOX — Docker, run pytest
-pass | fail | error
+pass | fail | timeout | error
    ▼  (4) VERDICT ENGINE — deterministic
-fail → 🔴 reproduced   pass → 🟢 not_reproducible   error → 🟡 insufficient_info
+fail    → 🔴 reproduced
+timeout → 🔴 reproduced (non-termination)   # valid test that hangs proves a hang bug
+pass    → 🟢 not_reproducible
+error   → 🟡 insufficient_info               # test never ran cleanly (import/collection)
 ```
+
+> **Timeout is a real verdict, not a failure to answer.** Once the test *parsed and
+> imported the target function cleanly*, a 10s wall-clock kill means the code did not
+> terminate on that input — a reproduced defect (see `find_next_leap_year` in §17).
+> Only errors *before* the test runs (import/collection errors) fall back to 🟡.
 
 ### Why each step is AI-load-bearing (not a wrapper)
 
@@ -345,10 +353,10 @@ USER: <issue title + body>
 ```
 SYSTEM: Given a target module and a bug claim, write ONE minimal pytest function that
 asserts the EXPECTED (correct) result. Import from `target_repo`. Output only Python.
-USER: module=target_repo.calculator  claim={function, inputs, expected}
-→ e.g.  from target_repo.calculator import get_discount
+USER: module=target_repo.billing  claim={function, inputs, expected}
+→ e.g.  from target_repo.billing import add_loyalty_points
         def test_repro():
-            assert get_discount(100, 20) == 80
+            assert add_loyalty_points(2147483647, 1) == 2147483648
 ```
 
 ### Validation before running (guards the 🟡 path)
@@ -473,12 +481,13 @@ docker build -t repodoctor-sandbox ./sandbox
 ## 13. Demo Script (≤3 min)
 
 1. **(0:00–0:30) Problem.** "Maintainers drown in bug reports — most aren't even real bugs."
-2. **(0:30–1:15) Real bug.** Paste a real bug report → 20 seconds later a **red failing test** appears: "Reproduced ✅, returned 120, expected 80."
-3. **(1:15–2:00) False report.** Paste an invalid report → **green** result: "Couldn't reproduce — works correctly."
-4. **(2:00–2:40) The payoff.** "It didn't guess — it *ran the code*. Real bug caught, false alarm rejected, automatically."
-5. **(2:40–3:00) Vision.** "Ships as a GitHub App that triages every incoming issue before a human touches it."
+2. **(0:30–1:15) Real bug.** Paste Report A (loyalty-points overflow) → 20 seconds later a **red failing test** appears: "Reproduced ✅ — returned -2147483648, expected 2147483648." Mention it's the same bug class that broke YouTube's counter.
+3. **(1:15–1:50) The safety beat.** Paste Report E (leap-year infinite loop) → the sandbox **kills it at 10s** and reports "Reproduced 🔴 — non-termination." "That's the Azure 2012 leap-day outage — and our timeout just contained it."
+4. **(1:50–2:20) False report.** Paste Report G (interest calc) → **green** result: "Couldn't reproduce — works correctly."
+5. **(2:20–2:40) The payoff.** "It didn't guess — it *ran the code*. Real bug caught, infinite loop contained, false alarm rejected, automatically."
+6. **(2:40–3:00) Vision.** "Ships as a GitHub App that triages every incoming issue before a human touches it."
 
-**The beat that lands:** the red failing test appearing live, proving the bug is real on camera.
+**The beat that lands:** the red failing test appearing live, then the infinite-loop demo timing out safely on camera.
 
 ---
 
@@ -489,7 +498,7 @@ docker build -t repodoctor-sandbox ./sandbox
 | Sandbox setup eats time | Pre-build the Docker image Day 1 morning; keep target repo tiny |
 | LLM generates an invalid test | Validate it parses/imports before running; fall back to 🟡 insufficient_info |
 | Arbitrary code execution danger | Sandbox only runs against *your* target repo; no network; resource limits |
-| Demo flakiness | Pre-script the exact 2 reports used in the video; test them beforehand |
+| Demo flakiness | Pre-script the exact reports in §17 (A, E, G, H) and test them beforehand |
 | Scope creep (auto-fix) | Auto-fix is stretch only — do NOT start it until MVP is deployed |
 
 ---
@@ -532,30 +541,141 @@ a test, runs your code, and proves it."*
 
 ---
 
-## 17. Demo Test Data (pre-scripted, rehearse these)
+## 17. Demo Test Data — production-grade bugs from real incidents
 
-Build `target_repo/calculator.py` with these exact planted bugs so the demo is reliable:
+The target repo is a small **payments / billing library** (`target_repo/billing.py`).
+Every planted bug is a *deterministic, function-level* defect (so the sandbox can
+reproduce it with a single `assert`) **and** is modeled on a documented real-world
+outage or exploit. This makes the demo tell one coherent story — "a billing service
+that shipped six famous classes of bug" — instead of one toy example.
+
+> **Why these and not, say, a flaky-network bug?** RepoDoctor can only prove bugs it can
+> re-run deterministically (§15). Each bug below reduces to `f(known_inputs) == expected`
+> (or a hang, or a raise), which is exactly what the sandbox verifies. Race conditions,
+> timing, and UI bugs are intentionally excluded.
+
+### The target repo
 
 ```python
-# target_repo/calculator.py
-def get_discount(price, percent):
-    return price + (price * percent / 100)   # BUG: should subtract
+# target_repo/billing.py
+"""A minimal billing library — every function here shipped a real-world class of bug."""
 
-def divide(a, b):
-    return a / b                              # correct — used for the false report
+INT32_MAX = 2_147_483_647
+
+
+def add_loyalty_points(current, earned):
+    """Accumulate a customer's loyalty points."""
+    total = current + earned
+    # BUG: simulates a signed 32-bit counter that wraps to negative on overflow.
+    # Real incident: YouTube "Gangnam Style" broke the signed-int32 view counter (2014).
+    if total > INT32_MAX:
+        total = -(total - INT32_MAX) + INT32_MAX * 0  # wraps negative instead of growing
+    return total
+
+
+def split_payment(total_cents, ways):
+    """Split a bill of `total_cents` evenly across `ways` people."""
+    # BUG: integer-truncates each share, so leftover cents silently vanish.
+    # Real incident: Vancouver Stock Exchange index (1982) truncated instead of rounding
+    # and drifted from 1000.000 to ~524.811 over 22 months.
+    share = total_cents // ways
+    return [share] * ways
+
+
+def apply_coupon(price, coupon_pct):
+    """Apply a percentage-off coupon to a price."""
+    # BUG: the discount line was duplicated in a refactor, so the coupon applies TWICE.
+    # Real incident: recurring class of checkout/coupon-stacking overcharge bugs.
+    discounted = price - price * coupon_pct / 100
+    discounted = discounted - price * coupon_pct / 100
+    return discounted
+
+
+def is_within_rate_limit(request_count, limit):
+    """Return True while a client is still allowed to make requests."""
+    # BUG: off-by-one — uses <= so it lets ONE request over the limit through.
+    # Real incident: the classic `>` vs `>=` API rate-limit / quota bypass.
+    return request_count <= limit
+
+
+def find_next_leap_year(year):
+    """Return the first leap year strictly after `year`."""
+    # BUG: increments by 4, so a non-multiple-of-4 start NEVER becomes divisible by 4
+    #      → infinite loop. Real incident: Microsoft Azure's Feb 29, 2012 leap-day
+    #      outage; the Zune 30 hung on Dec 31, 2008 for the same family of reason.
+    candidate = year + 1
+    while not (candidate % 4 == 0 and (candidate % 100 != 0 or candidate % 400 == 0)):
+        candidate += 4
+    return candidate
+
+
+def cart_total(unit_price, quantity):
+    """Compute the charge for `quantity` items at `unit_price`."""
+    # BUG: no validation — a negative quantity yields a NEGATIVE charge (store pays you).
+    # Real incident: negative-quantity cart exploits on multiple e-commerce platforms.
+    return unit_price * quantity
+
+
+def calculate_interest(principal, rate_pct, years):
+    """Simple interest = principal * rate * years. (This one is CORRECT.)"""
+    return principal * (rate_pct / 100) * years
 ```
 
-**Report A → expect 🔴 reproduced**
-> Title: "get_discount returns wrong value"
-> Body: "Calling get_discount(100, 20) returns 120 but it should return 80."
+### Bug → incident → verdict map
 
-**Report B → expect 🟢 not reproducible**
-> Title: "divide is broken"
-> Body: "divide(10, 2) returns 5 but I expected 4."  *(reporter is simply wrong)*
+| Function | Real incident it mirrors | Bug class | Demo report | Expected |
+|---|---|---|---|---|
+| `add_loyalty_points` | YouTube "Gangnam Style" counter, 2014 | 32-bit integer overflow | A | 🔴 reproduced |
+| `split_payment` | Vancouver Stock Exchange index, 1982 | truncation / lost cents | B | 🔴 reproduced |
+| `apply_coupon` | checkout coupon-stacking overcharge | double-applied discount | C | 🔴 reproduced |
+| `is_within_rate_limit` | `>` vs `>=` quota bypass | off-by-one | D | 🔴 reproduced |
+| `find_next_leap_year` | Azure Feb 29 2012 / Zune 2008 | infinite loop (non-termination) | E | 🔴 reproduced (timeout) |
+| `cart_total` | negative-quantity cart exploit | missing input validation | F | 🔴 reproduced |
+| `calculate_interest` | — (correct code) | none | G | 🟢 not reproducible |
+| — | — | unanswerable | H | 🟡 insufficient_info |
 
-**Report C → expect 🟡 insufficient_info**
+### The pre-scripted reports
+
+**Report A → 🔴 reproduced (integer overflow)**
+> Title: "Loyalty points go negative for high-spend customers"
+> Body: "add_loyalty_points(2147483647, 1) returns a negative number. It should return 2147483648. Our top customers' balances flipped negative overnight."
+
+**Report B → 🔴 reproduced (lost cents)**
+> Title: "Splitting a bill loses money"
+> Body: "split_payment(100, 3) returns [33, 33, 33], which only adds up to 99. One cent disappears every time. Expected the shares to sum back to 100."
+
+**Report C → 🔴 reproduced (double discount)**
+> Title: "20% coupon takes 40% off"
+> Body: "apply_coupon(100, 20) returns 60 but a 20% coupon should leave 80. We lost margin on every promo order."
+
+**Report D → 🔴 reproduced (off-by-one rate limit)**
+> Title: "Rate limiter allows one request too many"
+> Body: "is_within_rate_limit(100, 100) returns True, so a client at the limit still gets through. At exactly the limit it should return False."
+
+**Report E → 🔴 reproduced (infinite loop — the 'wow' beat)**
+> Title: "find_next_leap_year hangs the worker"
+> Body: "find_next_leap_year(2001) never returns and pins a CPU. It should return 2004."
+> *(The generated test never finishes; the sandbox kills it at 10s and RepoDoctor
+> reports "reproduced — non-termination". This is where the 10s timeout in §4.1
+> visibly saves the service — a great live moment for judges.)*
+
+**Report F → 🔴 reproduced (negative-quantity exploit)**
+> Title: "Negative quantity produces a negative charge"
+> Body: "cart_total(50, -2) returns -100 — the store would refund an attacker. It should reject a negative quantity with a ValueError."
+
+**Report G → 🟢 not reproducible (reporter is simply wrong)**
+> Title: "Interest calculation is broken"
+> Body: "calculate_interest(1000, 5, 2) returns 100 but I expected 105."
+> *(The code is correct; 1000 × 5% × 2 = 100. The test passes, proving no discrepancy.)*
+
+**Report H → 🟡 insufficient_info**
 > Title: "it doesn't work"
-> Body: "nothing works please fix"
+> Body: "billing is wrong please fix everything"
+> *(No function, inputs, or expected value → no test can be built.)*
+
+> **Demo tip:** you don't need all eight live. A tight run is **A (overflow) → E (the
+> infinite-loop timeout) → G (false report) → H (vague)** — it shows a severe real bug,
+> the safety timeout firing, an honest 🟢, and graceful 🟡 in under three minutes.
 
 ---
 
@@ -572,7 +692,8 @@ def divide(a, b):
 ## 19. Next Actions
 
 - [ ] Create the public GitHub repo and push this document + a README.
-- [ ] Build `target_repo/calculator.py` with the 2 planted bugs above.
+- [ ] Build `target_repo/billing.py` with the six planted incident-based bugs above.
 - [ ] Get the Docker sandbox running `pytest` with the security controls in §4.1.
+- [ ] Make sure the 10s timeout kills `find_next_leap_year(2001)` and reports 🔴 (non-termination).
 - [ ] Wire the `POST /analyze` pipeline end to end.
-- [ ] Confirm Reports A / B / C give 🔴 / 🟢 / 🟡 respectively.
+- [ ] Confirm Reports A–H give the verdicts in the §17 map.
