@@ -84,10 +84,15 @@ export default function Home() {
   const [providers, setProviders] = useState<Record<string, boolean>>({
     gemini: false,
     openai: false,
+    groq: false,
     grok: false,
+    openrouter: false,
   });
   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
+  const [apiOnline, setApiOnline] = useState<boolean | null>(null);
+  const [copiedText, setCopiedText] = useState(false);
 
+  // Load provider configurations
   useEffect(() => {
     async function fetchProviders() {
       try {
@@ -102,6 +107,21 @@ export default function Home() {
       }
     }
     fetchProviders();
+  }, []);
+
+  // Live health connectivity check
+  useEffect(() => {
+    async function checkHealth() {
+      try {
+        const res = await fetch(`${API_URL}/health`);
+        setApiOnline(res.ok);
+      } catch (e) {
+        setApiOnline(false);
+      }
+    }
+    checkHealth();
+    const interval = setInterval(checkHealth, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -121,7 +141,6 @@ export default function Home() {
         throw new Error(payload.detail ?? payload.error ?? "Analysis could not be completed.");
       }
       setResult(payload as Analysis);
-      // Auto switch tabs depending on result status
       if (payload.status === "insufficient_info" || !payload.generated_test) {
         setActiveTab("extracted");
       } else {
@@ -139,47 +158,77 @@ export default function Home() {
     setBody(preset.body);
   }
 
-  return (
-    <div className="relative min-h-screen overflow-x-hidden bg-slate-950 text-slate-100 selection:bg-indigo-500/30">
-      {/* Decorative background glow */}
-      <div className="absolute left-1/4 top-0 -z-10 h-[500px] w-[500px] rounded-full bg-indigo-500/10 blur-[120px]" />
-      <div className="absolute right-1/4 bottom-10 -z-10 h-[600px] w-[600px] rounded-full bg-purple-500/5 blur-[150px]" />
+  const handleCopyCode = (text: string | null) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedText(true);
+    setTimeout(() => setCopiedText(false), 2000);
+  };
 
-      <main className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
-        {/* Header */}
-        <header className="mb-12 text-center lg:text-left">
-          <div className="flex flex-col items-center justify-between gap-4 lg:flex-row">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/5 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-indigo-400">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75"></span>
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-500"></span>
-                </span>
-                RepoDoctor — AI Sandbox Triage
+  return (
+    <div className="relative min-h-screen overflow-x-hidden bg-[#070913] text-slate-100 selection:bg-indigo-500/30 font-sans">
+      {/* Dynamic Glowing Accents */}
+      <div className="absolute left-[-10%] top-[-10%] -z-10 h-[600px] w-[600px] rounded-full bg-gradient-to-tr from-indigo-600/10 to-violet-600/10 blur-[140px] opacity-70" />
+      <div className="absolute right-[-5%] bottom-[-5%] -z-10 h-[700px] w-[700px] rounded-full bg-gradient-to-br from-purple-600/5 to-pink-600/5 blur-[160px] opacity-55" />
+
+      <main className="mx-auto max-w-7xl px-6 py-14 sm:px-8 lg:px-12">
+        {/* Top Header Section */}
+        <header className="mb-14 border-b border-slate-800/40 pb-8">
+          <div className="flex flex-col items-center justify-between gap-6 lg:flex-row">
+            <div className="flex flex-col items-center gap-5 lg:flex-row lg:items-start text-center lg:text-left">
+              <img
+                src="/logo.png"
+                alt="RepoDoctor Logo"
+                className="h-20 w-20 rounded-2xl border border-indigo-500/20 shadow-lg shadow-indigo-500/10 object-contain bg-[#0a0d17]"
+              />
+              <div>
+                <div className="inline-flex items-center gap-2.5 rounded-full border border-indigo-500/20 bg-indigo-950/20 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-400 backdrop-blur-md">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75"></span>
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-500"></span>
+                  </span>
+                  RepoDoctor — AI Sandbox Triage
+                </div>
+                <h1 className="mt-4 bg-gradient-to-r from-slate-100 via-indigo-100 to-slate-400 bg-clip-text text-4xl font-black tracking-tight text-transparent sm:text-5xl lg:text-6xl">
+                  Prove Bug Reports
+                </h1>
+                <p className="mt-4 max-w-3xl text-lg text-slate-400 leading-relaxed">
+                  Extract natural language claims with LLMs, generate test suites, and execute code assertions automatically inside a secure Docker sandbox.
+                </p>
               </div>
-              <h1 className="mt-4 bg-gradient-to-r from-indigo-200 via-indigo-100 to-slate-400 bg-clip-text text-4xl font-extrabold tracking-tight text-transparent sm:text-5xl">
-                Prove Bug Reports in a Sandbox
-              </h1>
-              <p className="mt-3 max-w-2xl text-lg text-slate-400">
-                RepoDoctor extracts natural language claims using Gemini, synthesizes a pytest, and runs it against your code in an isolated Docker sandbox.
-              </p>
             </div>
-            <div className="flex gap-2">
-              <a
-                href={`${API_URL}/health`}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-slate-700 hover:text-slate-200"
-              >
-                API Health Check
-              </a>
+            
+            {/* Live API Health Check Badge */}
+            <div className="flex items-center gap-3">
+              <div className={`flex items-center gap-2.5 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-all duration-300 backdrop-blur-md ${
+                apiOnline === null
+                  ? "border-amber-500/20 bg-amber-500/5 text-amber-400"
+                  : apiOnline
+                  ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-400 shadow-lg shadow-emerald-500/5"
+                  : "border-red-500/20 bg-red-500/5 text-red-400"
+              }`}>
+                <span className={`relative flex h-2 w-2 ${apiOnline ? "animate-pulse" : ""}`}>
+                  <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                    apiOnline === null ? "bg-amber-400 animate-ping" : apiOnline ? "bg-emerald-400 animate-ping" : "bg-red-400"
+                  }`}></span>
+                  <span className={`relative inline-flex h-2 w-2 rounded-full ${
+                    apiOnline === null ? "bg-amber-500" : apiOnline ? "bg-emerald-500" : "bg-red-500"
+                  }`}></span>
+                </span>
+                {apiOnline === null ? "Connecting API..." : apiOnline ? "Sandbox API Online" : "Sandbox API Offline"}
+              </div>
             </div>
           </div>
         </header>
 
-        {/* Demo Quick-Presets */}
-        <section className="mb-8 rounded-xl border border-slate-800/80 bg-slate-900/40 p-4 backdrop-blur-md">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Demo Presets (Quick Fill)</h2>
+        {/* Quick presets row */}
+        <section className="mb-10 rounded-2xl border border-slate-800/60 bg-slate-900/20 p-5 backdrop-blur-md">
+          <div className="flex items-center gap-2 mb-3">
+            <svg className="h-4 w-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">Demo Presets (Quick Fill)</h2>
+          </div>
           <div className="flex flex-wrap gap-2.5">
             {DEMO_PRESETS.map((preset) => {
               const isSelected = title === preset.title && body === preset.body;
@@ -188,10 +237,10 @@ export default function Home() {
                   key={preset.id}
                   onClick={() => handlePresetSelect(preset)}
                   type="button"
-                  className={`rounded-lg px-4 py-2 text-xs font-medium border transition-all duration-200 ${
+                  className={`rounded-xl px-4 py-2.5 text-xs font-semibold border transition-all duration-200 active:scale-[0.98] ${
                     isSelected
-                      ? "bg-indigo-600/10 border-indigo-500/80 text-indigo-300 shadow-md shadow-indigo-500/5"
-                      : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                      ? "bg-indigo-600/10 border-indigo-500/80 text-indigo-300 shadow-lg shadow-indigo-500/5 ring-1 ring-indigo-500/30"
+                      : "bg-slate-950/40 border-slate-800/80 text-slate-400 hover:border-slate-700 hover:text-slate-200 hover:bg-slate-900/50"
                   }`}
                 >
                   {preset.label}
@@ -201,21 +250,24 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Core Layout Grid */}
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-          {/* Left Column: Form Input */}
+        {/* Master Dashboard Panel */}
+        <div className="grid grid-cols-1 gap-10 lg:grid-cols-12">
+          
+          {/* LEFT: Bug Report Form Card */}
           <section className="lg:col-span-5">
-            <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-6 shadow-xl backdrop-blur-lg">
-              <h2 className="text-xl font-bold text-slate-100">Submit Bug Report</h2>
-              <p className="mt-1 text-sm text-slate-400">Describe the function call and expectation.</p>
+            <div className="rounded-2xl border border-slate-800/80 bg-slate-900/30 p-6 shadow-2xl backdrop-blur-xl hover:border-slate-800 transition duration-300">
+              <h2 className="text-2xl font-bold text-slate-100 flex items-center gap-2">
+                Submit Bug Report
+              </h2>
+              <p className="mt-1.5 text-sm text-slate-400">Enter details to automatically reproduce and test</p>
 
-              <form className="mt-6 space-y-5" onSubmit={submit}>
+              <form className="mt-7 space-y-6" onSubmit={submit}>
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400" htmlFor="title">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400" htmlFor="title">
                     Issue Title
                   </label>
                   <input
-                    className="mt-2 w-full rounded-lg border border-slate-800 bg-slate-950/80 px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none ring-indigo-500/50 transition focus:border-indigo-500/80 focus:ring-4"
+                    className="mt-2.5 w-full rounded-xl border border-slate-800 bg-[#0b0e1a]/90 px-4 py-3 text-sm text-slate-100 placeholder-slate-600 outline-none ring-indigo-500/40 transition duration-200 focus:border-indigo-500/80 focus:ring-4"
                     id="title"
                     placeholder="e.g. get_discount returns wrong value"
                     required
@@ -225,13 +277,13 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400" htmlFor="body">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400" htmlFor="body">
                     Issue Details (Body)
                   </label>
                   <textarea
-                    className="mt-2 min-h-[160px] w-full rounded-lg border border-slate-800 bg-slate-950/80 px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-600 outline-none ring-indigo-500/50 transition focus:border-indigo-500/80 focus:ring-4"
+                    className="mt-2.5 min-h-[180px] w-full rounded-xl border border-slate-800 bg-[#0b0e1a]/90 px-4 py-3 text-sm text-slate-100 placeholder-slate-600 outline-none ring-indigo-500/40 transition duration-200 focus:border-indigo-500/80 focus:ring-4 font-mono text-[13px] leading-relaxed"
                     id="body"
-                    placeholder="e.g. Calling get_discount(100, 20) returns 120 but it should return 80."
+                    placeholder="Describe inputs and expected vs observed results..."
                     required
                     value={body}
                     onChange={(e) => setBody(e.target.value)}
@@ -239,11 +291,11 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">
                     AI Service Provider
                   </label>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    {["gemini", "openai", "grok"].map((prov) => {
+                  <div className="mt-2.5 grid grid-cols-5 gap-2">
+                    {["gemini", "openai", "groq", "grok", "openrouter"].map((prov) => {
                       const isAvailable = providers[prov];
                       const isSelected = selectedProvider === prov;
                       return (
@@ -252,16 +304,16 @@ export default function Home() {
                           type="button"
                           onClick={() => isAvailable && setSelectedProvider(prov)}
                           disabled={!isAvailable}
-                          className={`rounded-lg py-2.5 text-xs font-semibold border flex flex-col items-center justify-center transition-all ${
+                          className={`rounded-xl py-3 text-xs font-bold border flex flex-col items-center justify-center transition-all duration-200 active:scale-[0.96] ${
                             isSelected
-                              ? "bg-indigo-600/20 border-indigo-500 text-indigo-300 ring-2 ring-indigo-500/20"
+                              ? "bg-indigo-600/15 border-indigo-500/80 text-indigo-300 ring-2 ring-indigo-500/20"
                               : isAvailable
-                              ? "bg-slate-950/80 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
-                              : "bg-slate-950/40 border-slate-900 text-slate-600 cursor-not-allowed opacity-50"
+                              ? "bg-slate-950/50 border-slate-800/80 text-slate-400 hover:border-slate-700 hover:text-slate-200 hover:bg-slate-900/80"
+                              : "bg-slate-950/20 border-slate-900/60 text-slate-600 cursor-not-allowed opacity-40"
                           }`}
                         >
-                          <span className="capitalize">{prov}</span>
-                          <span className="text-[9px] mt-0.5 text-slate-500">
+                          <span className="capitalize">{prov === "openrouter" ? "OpenRouter" : prov}</span>
+                          <span className={`text-[9px] mt-1 font-semibold ${isAvailable ? "text-emerald-500/80" : "text-slate-600"}`}>
                             {isAvailable ? "Active" : "Locked"}
                           </span>
                         </button>
@@ -271,21 +323,27 @@ export default function Home() {
                 </div>
 
                 <button
-                  className="relative w-full overflow-hidden rounded-lg bg-gradient-to-r from-indigo-600 to-indigo-700 py-3 font-semibold text-white transition-all hover:from-indigo-500 hover:to-indigo-600 hover:shadow-lg hover:shadow-indigo-500/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                  className="relative w-full overflow-hidden rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-700 to-violet-700 py-3.5 font-bold text-white transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/10 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={loading}
                   type="submit"
                 >
                   <span className="relative flex items-center justify-center gap-2">
                     {loading ? (
                       <>
-                        <svg className="h-4 w-4 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                        <svg className="h-4.5 w-4.5 animate-spin text-white" fill="none" viewBox="0 0 24 24">
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                         </svg>
-                        Triage In Progress...
+                        Triaging Bug Report...
                       </>
                     ) : (
-                      <>Analyze & Test Report</>
+                      <>
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Analyze & Test Report
+                      </>
                     )}
                   </span>
                 </button>
@@ -293,82 +351,90 @@ export default function Home() {
             </div>
 
             {error && (
-              <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-400 backdrop-blur-sm">
+              <div className="mt-4 rounded-xl border border-rose-500/20 bg-rose-500/5 p-4.5 text-sm text-rose-400 backdrop-blur-md">
                 <div className="flex gap-2">
-                  <span className="font-semibold">Error:</span>
-                  <span>{error}</span>
+                  <svg className="h-5 w-5 shrink-0 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <div>
+                    <span className="font-bold">Error encountered:</span>
+                    <p className="mt-1 text-xs text-rose-500/80 font-mono leading-relaxed">{error}</p>
+                  </div>
                 </div>
               </div>
             )}
           </section>
 
-          {/* Right Column: Triaging Output Panel */}
+          {/* RIGHT: Triaging Output Panel */}
           <section className="lg:col-span-7">
             {result ? (
               <div className="space-y-6">
-                {/* Result Summary Banner */}
+                {/* Result Summary Card Banner */}
                 <div
-                  className={`rounded-2xl border p-6 shadow-xl backdrop-blur-lg transition-all duration-300 ${
+                  className={`rounded-2xl border p-6 shadow-2xl backdrop-blur-xl transition-all duration-300 relative overflow-hidden ${
                     result.status === "reproduced"
-                      ? "border-rose-500/20 bg-rose-950/10"
+                      ? "border-rose-500/30 bg-rose-950/10 shadow-rose-950/10"
                       : result.status === "not_reproducible"
-                      ? "border-emerald-500/20 bg-emerald-950/10"
-                      : "border-amber-500/20 bg-amber-950/10"
+                      ? "border-emerald-500/30 bg-emerald-950/10 shadow-emerald-950/10"
+                      : "border-amber-500/30 bg-amber-950/10 shadow-amber-950/10"
                   }`}
                 >
+                  <div className="absolute right-0 top-0 h-40 w-40 rounded-full blur-[70px] opacity-10 -z-10 bg-current" />
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
                       {result.status === "reproduced" && (
-                        <span className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-4 py-1 text-sm font-semibold text-rose-400">
+                        <span className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-4.5 py-1 text-xs font-bold uppercase tracking-wider text-rose-400">
                           🔴 Reproduced (Bug Real)
                         </span>
                       )}
                       {result.status === "not_reproducible" && (
-                        <span className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-1 text-sm font-semibold text-emerald-400">
+                        <span className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4.5 py-1 text-xs font-bold uppercase tracking-wider text-emerald-400">
                           🟢 Not Reproducible
                         </span>
                       )}
                       {result.status === "insufficient_info" && (
-                        <span className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1 text-sm font-semibold text-amber-400">
+                        <span className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-4.5 py-1 text-xs font-bold uppercase tracking-wider text-amber-400">
                           🟡 Insufficient Info
                         </span>
                       )}
                     </div>
-                    <span className="rounded-full bg-slate-900 border border-slate-800 px-3 py-1 text-xs text-slate-400">
+                    <span className="rounded-xl bg-slate-950/60 border border-slate-800/80 px-3.5 py-1.5 text-xs text-slate-400 font-mono">
                       ⏱️ {result.duration_ms} ms
                     </span>
                   </div>
 
-                  <p className="mt-4 text-base leading-relaxed text-slate-200">{result.explanation}</p>
+                  <p className="mt-4.5 text-base leading-relaxed text-slate-200 font-semibold">{result.explanation}</p>
                 </div>
 
                 {/* IDE / Output Tabbed Inspector */}
-                <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl">
-                  {/* macOS IDE header */}
-                  <div className="flex items-center justify-between border-b border-slate-900 bg-slate-900/60 px-4 py-3">
+                <div className="overflow-hidden rounded-2xl border border-slate-850 bg-slate-950/80 shadow-2xl">
+                  {/* macOS IDE header styling */}
+                  <div className="flex items-center justify-between border-b border-slate-900 bg-slate-900/40 px-4 py-3">
                     <div className="flex gap-1.5">
                       <span className="h-3 w-3 rounded-full bg-rose-500/80" />
                       <span className="h-3 w-3 rounded-full bg-amber-500/80" />
                       <span className="h-3 w-3 rounded-full bg-emerald-500/80" />
                     </div>
-                    <div className="flex gap-2">
+                    
+                    {/* tab group */}
+                    <div className="flex gap-1 border border-slate-800 bg-[#0e111d] p-1 rounded-xl">
                       <button
                         onClick={() => setActiveTab("extracted")}
-                        className={`rounded px-2.5 py-1 text-xs font-semibold transition ${
+                        className={`rounded-lg px-3 py-1.5 text-xs font-bold transition duration-200 ${
                           activeTab === "extracted"
-                            ? "bg-indigo-600/20 text-indigo-400"
-                            : "text-slate-500 hover:text-slate-300"
+                            ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/20"
+                            : "text-slate-400 hover:text-slate-200"
                         }`}
                       >
-                        Extracted Contract
+                        Claims Contract
                       </button>
                       {result.generated_test && (
                         <button
                           onClick={() => setActiveTab("test")}
-                          className={`rounded px-2.5 py-1 text-xs font-semibold transition ${
+                          className={`rounded-lg px-3 py-1.5 text-xs font-bold transition duration-200 ${
                             activeTab === "test"
-                              ? "bg-indigo-600/20 text-indigo-400"
-                              : "text-slate-500 hover:text-slate-300"
+                              ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/20"
+                              : "text-slate-400 hover:text-slate-200"
                           }`}
                         >
                           test_generated.py
@@ -377,64 +443,73 @@ export default function Home() {
                       {result.run_output && (
                         <button
                           onClick={() => setActiveTab("output")}
-                          className={`rounded px-2.5 py-1 text-xs font-semibold transition ${
+                          className={`rounded-lg px-3 py-1.5 text-xs font-bold transition duration-200 ${
                             activeTab === "output"
-                              ? "bg-indigo-600/20 text-indigo-400"
-                              : "text-slate-500 hover:text-slate-300"
+                              ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/20"
+                              : "text-slate-400 hover:text-slate-200"
                           }`}
                         >
-                          Sandbox Output
+                          Sandbox Logs
                         </button>
                       )}
                     </div>
-                    <span className="text-[10px] uppercase tracking-widest text-slate-600">INSPECTOR</span>
+                    
+                    <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold font-mono">INSPECTOR</span>
                   </div>
 
                   {/* Tab Panels */}
-                  <div className="p-5 font-mono text-sm leading-6">
+                  <div className="p-6 font-mono text-sm leading-6">
+                    
+                    {/* Tab 1: Extracted contract tables */}
                     {activeTab === "extracted" && (
                       <div className="space-y-4">
-                        <div className="flex items-center justify-between border-b border-slate-900 pb-2">
-                          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Property</span>
-                          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Value</span>
-                        </div>
                         {result.extracted ? (
-                          <div className="space-y-2 text-slate-300">
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">Target Function:</span>
-                              <span className="font-semibold text-indigo-300">{result.extracted.function ?? "null"}</span>
+                          <div className="divide-y divide-slate-900 border border-slate-900 rounded-xl overflow-hidden bg-[#0a0d17]/40 text-slate-300">
+                            <div className="flex justify-between px-4.5 py-3 hover:bg-slate-900/10">
+                              <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Target Function</span>
+                              <span className="font-semibold text-indigo-300">{result.extracted.function ?? "None"}</span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">Inputs:</span>
-                              <span className="text-slate-100">{JSON.stringify(result.extracted.inputs)}</span>
+                            <div className="flex justify-between px-4.5 py-3 hover:bg-slate-900/10">
+                              <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Inputs</span>
+                              <span className="text-slate-100 font-semibold">{JSON.stringify(result.extracted.inputs)}</span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">Expected Value:</span>
+                            <div className="flex justify-between px-4.5 py-3 hover:bg-slate-900/10">
+                              <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Expected Value</span>
                               <span className="text-emerald-400 font-semibold">{JSON.stringify(result.extracted.expected)}</span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">Observed Value:</span>
+                            <div className="flex justify-between px-4.5 py-3 hover:bg-slate-900/10">
+                              <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Observed Value</span>
                               <span className="text-rose-400 font-semibold">{JSON.stringify(result.extracted.observed)}</span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">Confidence Score:</span>
-                              <span className="text-amber-400 font-semibold">{result.extracted.confidence ?? "null"}</span>
+                            <div className="flex justify-between px-4.5 py-3 hover:bg-slate-900/10">
+                              <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Confidence</span>
+                              <span className="text-amber-400 font-semibold">{(result.extracted.confidence ?? 0.0) * 100}%</span>
                             </div>
                           </div>
                         ) : (
-                          <p className="text-slate-600 italic">No structured data was extracted.</p>
+                          <p className="text-slate-500 italic text-center py-4">No structured data was extracted.</p>
                         )}
                       </div>
                     )}
 
+                    {/* Tab 2: test_generated.py syntax code block */}
                     {activeTab === "test" && (
-                      <pre className="overflow-x-auto text-indigo-300">
-                        <code>{result.generated_test}</code>
-                      </pre>
+                      <div className="relative">
+                        <button
+                          onClick={() => handleCopyCode(result.generated_test)}
+                          className="absolute right-0 top-0 rounded-lg border border-slate-800 bg-[#0e111d] px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition active:scale-95"
+                        >
+                          {copiedText ? "Copied!" : "Copy Code"}
+                        </button>
+                        <pre className="overflow-x-auto text-[#b4c6fc] text-xs pt-8 select-all font-mono leading-relaxed bg-[#0a0d17]/30 p-4 rounded-xl border border-slate-900">
+                          <code>{result.generated_test}</code>
+                        </pre>
+                      </div>
                     )}
 
+                    {/* Tab 3: Sandbox output logs */}
                     {activeTab === "output" && (
-                      <pre className="overflow-x-auto text-slate-300 whitespace-pre-wrap">
+                      <pre className="overflow-x-auto text-slate-300 text-xs select-text font-mono leading-relaxed bg-[#0a0d17]/30 p-4 rounded-xl border border-slate-900 whitespace-pre-wrap">
                         <code>{result.run_output}</code>
                       </pre>
                     )}
@@ -442,23 +517,25 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <div className="flex h-full min-h-[300px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-slate-900/20 p-8 text-center text-slate-500">
-                <svg
-                  className="h-10 w-10 text-slate-600 animate-pulse"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5"
-                  />
-                </svg>
-                <h3 className="mt-4 font-bold text-slate-400">Sandbox Idle</h3>
-                <p className="mt-2 max-w-sm text-sm text-slate-500">
-                  Select a preset above or submit a custom report to see the sandbox verification live.
+              <div className="flex h-full min-h-[400px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-800/80 bg-slate-900/5 p-8 text-center text-slate-500 backdrop-blur-md">
+                <div className="h-14 w-14 rounded-2xl bg-indigo-600/5 flex items-center justify-center border border-indigo-500/10 shadow-lg shadow-indigo-500/5">
+                  <svg
+                    className="h-7 w-7 text-indigo-400 animate-pulse"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5"
+                    />
+                  </svg>
+                </div>
+                <h3 className="mt-4 font-extrabold text-slate-300 text-lg">Sandbox Idle</h3>
+                <p className="mt-2.5 max-w-sm text-sm text-slate-500 leading-relaxed">
+                  Select a quickpreset above or enter custom parameters on the left to activate secure verification.
                 </p>
               </div>
             )}

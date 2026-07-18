@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import tempfile
 import uuid
@@ -67,19 +68,74 @@ def run_test(test_source: str) -> SandboxResult:
             _stop_container(container_name)
             return {
                 "passed": False,
-                "output": _combine_output(error.stdout, error.stderr),
+                "output": format_test_output(_combine_output(error.stdout, error.stderr)),
                 "timed_out": True,
                 "exit_code": -1,
             }
         except OSError as error:
-            return {"passed": False, "output": str(error), "timed_out": False, "exit_code": -1}
+            return {"passed": False, "output": format_test_output(str(error)), "timed_out": False, "exit_code": -1}
 
     return {
         "passed": completed.returncode == 0,
-        "output": _combine_output(completed.stdout, completed.stderr),
+        "output": format_test_output(_combine_output(completed.stdout, completed.stderr)),
         "timed_out": False,
         "exit_code": completed.returncode,
     }
+
+
+def format_test_output(output: str) -> str:
+    """Parse and clean up raw sandbox output into a human-friendly format."""
+    if not output:
+        return output
+
+    assert_match = re.search(r"E\s+assert\s+(.+?)\s*==\s*(.+)", output)
+    where_match = re.search(r"E\s+\+\s+where\s+(.+?)\s*=\s*(.+)", output)
+
+    summary = []
+    if assert_match:
+        observed_val = assert_match.group(1).strip()
+        expected_val = assert_match.group(2).strip()
+
+        if where_match:
+            call_expr = where_match.group(2).strip()
+            observed_val = where_match.group(1).strip()
+        else:
+            call_expr = None
+            lines = output.splitlines()
+            for line in lines:
+                if line.strip().startswith(">") and "assert" in line:
+                    call_expr = line.replace(">", "").replace("assert", "").strip()
+                    break
+
+        summary.append("==================================================")
+        summary.append("❌ TEST FAILURE ENCOUNTERED IN SANDBOX")
+        summary.append("==================================================")
+        if call_expr:
+            summary.append(f"🔍 Executed:  {call_expr}")
+        summary.append(f"📥 Returned:  {observed_val}")
+        summary.append(f"📤 Expected:  {expected_val}")
+        summary.append("==================================================")
+        summary.append("\nDetailed Sandbox Logs:")
+        summary.append("--------------------------------------------------")
+        summary.append(output)
+        return "\n".join(summary)
+
+    exc_match = re.search(r"E\s+([A-Za-z]+Error|Exception):\s*(.+)", output)
+    if exc_match:
+        exc_type = exc_match.group(1)
+        exc_msg = exc_match.group(2)
+        summary.append("==================================================")
+        summary.append("❌ RUNTIME ERROR ENCOUNTERED IN SANDBOX")
+        summary.append("==================================================")
+        summary.append(f"⚠️  Error Type: {exc_type}")
+        summary.append(f"💬 Message:    {exc_msg}")
+        summary.append("==================================================")
+        summary.append("\nDetailed Sandbox Logs:")
+        summary.append("--------------------------------------------------")
+        summary.append(output)
+        return "\n".join(summary)
+
+    return output
 
 
 def _stop_container(container_name: str) -> None:
