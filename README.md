@@ -6,8 +6,8 @@ RepoDoctor is an agentic AI-powered bug reproduction and verification tool. It a
 
 ## 🚀 Live Demo & Deployments
 
-- **Frontend (Vercel)**: `https://repodoctor-frontend.vercel.app` (Placeholder)
-- **Backend (Render/Railway)**: `https://repodoctor-backend.up.railway.app` (Placeholder)
+- **Frontend (Vercel)**: `https://repodoctor-mu.vercel.app/` (Placeholder)
+- **Backend (Render/Railway)**: `repodoctor-production.up.railway.app` (Placeholder)
 
 ---
 
