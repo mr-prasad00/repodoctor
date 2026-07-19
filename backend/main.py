@@ -39,12 +39,16 @@ except ModuleNotFoundError:
 
 
 app = FastAPI(title="RepoDoctor")
+
+frontend_origin = os.getenv("FRONTEND_ORIGIN", "*")
+allowed_origins = ["*"] if frontend_origin == "*" else [frontend_origin, "http://localhost:3000", "http://127.0.0.1:3000"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -57,6 +61,16 @@ class AnalyzeRequest(BaseModel):
 @app.on_event("startup")
 def initialise_database() -> None:
     init_db()
+
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "status": "ok",
+        "service": "RepoDoctor API",
+        "health": "/health",
+        "docs": "/docs",
+    }
 
 
 @app.get("/health")
