@@ -72,8 +72,34 @@ def run_test(test_source: str) -> SandboxResult:
                 "timed_out": True,
                 "exit_code": -1,
             }
-        except OSError as error:
-            return {"passed": False, "output": format_test_output(str(error)), "timed_out": False, "exit_code": -1}
+        except OSError:
+            # Fall back to isolated subprocess pytest if Docker is not available in cloud PaaS containers (e.g. Railway)
+            project_root = str(Path(__file__).resolve().parent.parent)
+            python_exec = sys.executable or "python3"
+            env = os.environ.copy()
+            env["PYTHONPATH"] = project_root
+            
+            local_cmd = [
+                python_exec,
+                "-m",
+                "pytest",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                str(test_path),
+            ]
+            try:
+                completed = subprocess.run(
+                    local_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=SANDBOX_TIMEOUT_SECONDS,
+                    cwd=temp_dir,
+                    env=env,
+                    check=False,
+                )
+            except Exception as sub_err:
+                return {"passed": False, "output": format_test_output(str(sub_err)), "timed_out": False, "exit_code": -1}
 
     return {
         "passed": completed.returncode == 0,
