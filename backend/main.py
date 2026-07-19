@@ -13,10 +13,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+if "backend" not in sys.modules:
+    try:
+        import backend
+    except ModuleNotFoundError:
+        _b = types.ModuleType("backend")
+        _b.__path__ = [os.path.dirname(os.path.abspath(__file__))]
+        sys.modules["backend"] = _b
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+cur_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = str(Path(cur_dir).parent)
+if cur_dir not in sys.path:
+    sys.path.insert(0, cur_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+load_dotenv(Path(cur_dir).parent / ".env")
 
 from backend.db import init_db, persist_analysis
 from backend.extractor import extract
