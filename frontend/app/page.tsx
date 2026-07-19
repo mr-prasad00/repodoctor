@@ -21,14 +21,19 @@ type Analysis = {
 };
 
 function getApiUrl(): string {
-  const envUrl = process.env.NEXT_PUBLIC_API_URL;
-  if (envUrl && !envUrl.includes("localhost") && !envUrl.includes("127.0.0.1")) {
-    return envUrl.replace(/\/$/, "");
+  let url = process.env.NEXT_PUBLIC_API_URL;
+  if (!url || url.includes("localhost") || url.includes("127.0.0.1")) {
+    if (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+      url = "https://repodoctor-production.up.railway.app";
+    } else {
+      url = "http://localhost:8000";
+    }
   }
-  if (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
-    return "https://repodoctor-production.up.railway.app";
+  url = url.trim().replace(/\/$/, "");
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    url = `https://${url}`;
   }
-  return "http://localhost:8000";
+  return url;
 }
 
 // Pre-scripted reports for easy demo testing
