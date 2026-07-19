@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -28,20 +29,7 @@ def generate_test(extracted: Mapping[str, Any]) -> str:
     exception_name = ""
     if isinstance(expected, str):
         cleaned_exp = expected.strip()
-        if cleaned_exp.startswith("raise "):
-            cleaned_exp = cleaned_exp[6:].strip()
-        if cleaned_exp in (
-            "ValueError",
-            "TypeError",
-            "IndexError",
-            "KeyError",
-            "ZeroDivisionError",
-            "AssertionError",
-            "Exception",
-            "AttributeError",
-            "RuntimeError",
-            "NameError",
-        ) or cleaned_exp.endswith("Error") or cleaned_exp.endswith("Exception"):
+        if cleaned_exp in ("ValueError", "TypeError", "KeyError", "IndexError", "ZeroDivisionError", "Exception"):
             is_exception = True
             exception_name = cleaned_exp
 
@@ -68,7 +56,10 @@ def _find_module_for_function(function_name: str) -> str:
     """Scan files in target_repo/ to locate which module defines function_name."""
     fallback = "target_repo.billing"
 
-    target_repo_dir = Path(__file__).resolve().parent.parent / "target_repo"
+    cur_dir = Path(__file__).resolve().parent
+    target_repo_dir = cur_dir / "target_repo"
+    if not target_repo_dir.exists():
+        target_repo_dir = cur_dir.parent / "target_repo"
     if not target_repo_dir.exists():
         return fallback
 
