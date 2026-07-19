@@ -259,7 +259,9 @@ def test_grok_provider_extraction(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_providers_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", "gemini_key")
     monkeypatch.setenv("OPENAI_API_KEY", "openai_key")
+    monkeypatch.setenv("GROQ_API_KEY", "groq_key")
     monkeypatch.setenv("GROK_API_KEY", "grok_key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter_key")
 
     with TestClient(main.app) as client:
         response = client.get("/providers")
@@ -268,8 +270,60 @@ def test_providers_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     data = response.json()
     assert data["providers"]["gemini"] is True
     assert data["providers"]["openai"] is True
+    assert data["providers"]["groq"] is True
     assert data["providers"]["grok"] is True
+    assert data["providers"]["openrouter"] is True
     assert data["default"] == "gemini"
+
+
+def test_openrouter_provider_extraction(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fake_openrouter_key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+
+    fake_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "function": "split_payment",
+                            "inputs": [100, 3],
+                            "expected": [33, 33, 33],
+                            "version": "1.0.0",
+                            "confidence": 0.95,
+                        }
+                    )
+                )
+            )
+        ]
+    )
+
+    class FakeChat:
+        def create(self, **kwargs: Any) -> Any:
+            assert kwargs["model"] == "meta-llama/llama-3.3-70b-instruct:free"
+            return fake_response
+
+    class FakeClient:
+        def __init__(self, **kwargs: Any) -> None:
+            assert kwargs["api_key"] == "fake_openrouter_key"
+            assert kwargs["base_url"] == "https://openrouter.ai/api/v1"
+            assert kwargs["default_headers"] == {
+                "HTTP-Referer": "http://localhost:3000",
+                "X-Title": "RepoDoctor",
+            }
+            self.chat = SimpleNamespace(completions=FakeChat())
+            self.default_headers = kwargs["default_headers"]
+
+    monkeypatch.setattr(extractor, "OpenAI", FakeClient)
+
+    # Resolve provider requesting openrouter
+    assert extractor._resolve_provider("openrouter") == "openrouter"
+
+    # Test extraction with openrouter
+    res = extractor.extract("split payment", "wrong result", provider="openrouter")
+    assert res["function"] == "split_payment"
+    assert res["inputs"] == [100, 3]
+    assert res["expected"] == [33, 33, 33]
 
 
 def test_generator_module_lookup_and_exceptions() -> None:
@@ -297,3 +351,253 @@ def test_generator_module_lookup_and_exceptions() -> None:
     assert "from target_repo.billing import cart_total" in exception_test
     assert "with pytest.raises(ValueError):" in exception_test
     assert "cart_total(50, -2)" in exception_test
+
+
+def test_groq_key_autodetect_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GROK_API_KEY", "gsk_fake_groq_key")
+    monkeypatch.setenv("GROK_MODEL", "llama-3.3-70b-versatile")
+
+    fake_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "function": "split_payment",
+                            "inputs": [100, 3],
+                            "expected": [33, 33, 33],
+                            "version": "1.0.0",
+                            "confidence": 0.95,
+                        }
+                    )
+                )
+            )
+        ]
+    )
+
+    class FakeChat:
+        def create(self, **kwargs: Any) -> Any:
+            assert kwargs["model"] == "llama-3.3-70b-versatile"
+            return fake_response
+
+    class FakeClient:
+        def __init__(self, **kwargs: Any) -> None:
+            assert kwargs["api_key"] == "gsk_fake_groq_key"
+            assert kwargs["base_url"] == "https://api.groq.com/openai/v1"
+            self.chat = SimpleNamespace(completions=FakeChat())
+
+    monkeypatch.setattr(extractor, "OpenAI", FakeClient)
+
+    # Test extraction with groq key under grok provider
+    res = extractor.extract("split payment", "wrong result", provider="grok")
+    assert res["function"] == "split_payment"
+    assert res["inputs"] == [100, 3]
+    assert res["expected"] == [33, 33, 33]
+
+
+def test_groq_provider_extraction(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "fake_groq_key")
+    monkeypatch.setenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+    fake_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "function": "split_payment",
+                            "inputs": [100, 3],
+                            "expected": [33, 33, 33],
+                            "version": "1.0.0",
+                            "confidence": 0.95,
+                        }
+                    )
+                )
+            )
+        ]
+    )
+
+    class FakeChat:
+        def create(self, **kwargs: Any) -> Any:
+            assert kwargs["model"] == "llama-3.3-70b-versatile"
+            assert kwargs["response_format"] == {"type": "json_object"}
+            return fake_response
+
+    class FakeClient:
+        def __init__(self, **kwargs: Any) -> None:
+            assert kwargs["api_key"] == "fake_groq_key"
+            assert kwargs["base_url"] == "https://api.groq.com/openai/v1"
+            self.chat = SimpleNamespace(completions=FakeChat())
+
+    monkeypatch.setattr(extractor, "OpenAI", FakeClient)
+
+    # Resolve provider requesting groq
+    assert extractor._resolve_provider("groq") == "groq"
+
+    # Test extraction with groq
+    res = extractor.extract("split payment", "wrong result", provider="groq")
+    assert res["function"] == "split_payment"
+    assert res["inputs"] == [100, 3]
+    assert res["expected"] == [33, 33, 33]
+
+
+def test_format_test_output_assertion_error() -> None:
+    from backend.sandbox import format_test_output
+
+    raw_output = """
+    def test_repro():
+>       assert add_loyalty_points(2147483647, 1) == 2147483648
+E       assert -1 == 2147483648
+E        +  where -1 = add_loyalty_points(2147483647, 1)
+    """
+    formatted = format_test_output(raw_output)
+    assert "❌ TEST FAILURE ENCOUNTERED IN SANDBOX" in formatted
+    assert "Executed:  add_loyalty_points(2147483647, 1)" in formatted
+    assert "Returned:  -1" in formatted
+    assert "Expected:  2147483648" in formatted
+
+
+def test_format_test_output_runtime_error() -> None:
+    from backend.sandbox import format_test_output
+
+    raw_output = """
+>   billing_test = split_payment(100, 3)
+E   NameError: name 'split_payment' is not defined
+    """
+    formatted = format_test_output(raw_output)
+    assert "❌ RUNTIME ERROR ENCOUNTERED IN SANDBOX" in formatted
+    assert "Error Type: NameError" in formatted
+    assert "Message:    name 'split_payment' is not defined" in formatted
+
+
+def test_parse_document_text() -> None:
+    from backend.parser import parse_document
+    raw = b"Hello world # Title\nSome content"
+    assert parse_document(raw, "doc.txt") == "Hello world # Title\nSome content"
+    assert parse_document(raw, "doc.md") == "Hello world # Title\nSome content"
+
+
+def test_split_document_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    from backend.splitter import split_document
+    
+    monkeypatch.setenv("AI_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "fake_key")
+    
+    fake_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=json.dumps([
+                        {"title": "Bug 1", "body": "Body 1"},
+                        {"title": "Bug 2", "body": "Body 2"}
+                    ])
+                )
+            )
+        ]
+    )
+
+    class FakeClient:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+        chat = SimpleNamespace(
+            completions=SimpleNamespace(
+                create=lambda **kwargs: fake_response
+            )
+        )
+
+    import backend.splitter as splitter
+    monkeypatch.setattr(splitter, "OpenAI", FakeClient)
+
+    res = split_document("some raw text", provider="openai")
+    assert len(res) == 2
+    assert res[0]["title"] == "Bug 1"
+    assert res[0]["body"] == "Body 1"
+
+
+def test_analyze_document_endpoint(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from backend.models import AnalysisResult
+    database_path = tmp_path / "repodoctor.db"
+    monkeypatch.setenv("REPODOCTOR_DB_PATH", str(database_path))
+    
+    import backend.parser as parser
+    import backend.splitter as splitter
+    monkeypatch.setattr(parser, "parse_document", lambda _bytes, _name: "mocked document text")
+    monkeypatch.setattr(splitter, "split_document", lambda _text, _prov: [
+        {"title": "Bug A", "body": "Body A"},
+        {"title": "Bug B", "body": "Body B"}
+    ])
+    
+    mocked_result_1 = AnalysisResult(
+        status="reproduced",
+        extracted={"function": "func1", "inputs": [], "expected": 1, "observed": 2, "version": None, "confidence": 0.9},
+        generated_test="def test_repro(): pass",
+        run_output="AssertionError",
+        explanation="first bug explanation",
+        duration_ms=120
+    )
+    mocked_result_2 = AnalysisResult(
+        status="not_reproducible",
+        extracted={"function": "func2", "inputs": [], "expected": 3, "observed": 3, "version": None, "confidence": 0.8},
+        generated_test="def test_repro(): pass",
+        run_output="Pass",
+        explanation="second bug explanation",
+        duration_ms=80
+    )
+    
+    pipeline_calls = []
+    def fake_run_pipeline(title: str, body: str, provider: str | None = None) -> AnalysisResult:
+        pipeline_calls.append((title, body, provider))
+        if len(pipeline_calls) == 1:
+            return mocked_result_1
+        return mocked_result_2
+
+    monkeypatch.setattr(main, "run_pipeline", fake_run_pipeline)
+    
+    with TestClient(main.app) as client:
+        files = {"file": ("document.md", b"my markdown file content")}
+        response = client.post("/analyze-document", files=files, data={"provider": "groq"})
+        
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["bug_count"] == 2
+    assert "document_id" in res_data
+    assert res_data["results"] == [
+        {"seq": 1, "status": "reproduced", "explanation": "first bug explanation"},
+        {"seq": 2, "status": "not_reproducible", "explanation": "second bug explanation"}
+    ]
+    
+    assert len(pipeline_calls) == 2
+    assert pipeline_calls[0] == ("Bug A", "Body A", "groq")
+    assert pipeline_calls[1] == ("Bug B", "Body B", "groq")
+    
+    with sqlite3.connect(database_path) as connection:
+        doc_count = connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        assert doc_count == 1
+        
+        rep_rows = connection.execute("SELECT seq, issue_title, issue_body FROM reports").fetchall()
+        assert len(rep_rows) == 2
+        assert rep_rows[0] == (1, "Bug A", "Body A")
+        assert rep_rows[1] == (2, "Bug B", "Body B")
+        
+        verdict_rows = connection.execute("SELECT status, explanation FROM verdicts").fetchall()
+        assert len(verdict_rows) == 2
+        assert verdict_rows[0] == ("reproduced", "first bug explanation")
+        assert verdict_rows[1] == ("not_reproducible", "second bug explanation")
+
+    doc_id = res_data["document_id"]
+    with TestClient(main.app) as client:
+        get_response = client.get(f"/documents/{doc_id}")
+        
+    assert get_response.status_code == 200
+    get_data = get_response.json()
+    assert get_data["id"] == doc_id
+    assert get_data["filename"] == "document.md"
+    assert get_data["raw_text"] == "mocked document text"
+    assert get_data["bug_count"] == 2
+    assert len(get_data["reports"]) == 2
+    assert get_data["reports"][0]["seq"] == 1
+    assert get_data["reports"][0]["status"] == "reproduced"
+    
+    with TestClient(main.app) as client:
+        get_404 = client.get("/documents/99999")
+    assert get_404.status_code == 404

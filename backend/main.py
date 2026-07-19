@@ -8,15 +8,27 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+if "backend" not in sys.modules:
+    try:
+        import backend
+    except ModuleNotFoundError:
+        _b = types.ModuleType("backend")
+        _b.__path__ = [os.path.dirname(os.path.abspath(__file__))]
+        sys.modules["backend"] = _b
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+cur_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = str(Path(cur_dir).parent)
+if cur_dir not in sys.path:
+    sys.path.insert(0, cur_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+load_dotenv(Path(cur_dir).parent / ".env")
 
 from backend.db import init_db, persist_analysis
 from backend.extractor import extract
@@ -57,25 +69,35 @@ def get_available_providers() -> dict[str, Any]:
     """Check which AI provider API keys are active in the environment."""
     gemini_key = os.getenv("GEMINI_API_KEY")
     openai_key = os.getenv("OPENAI_API_KEY")
+    groq_key = os.getenv("GROQ_API_KEY")
     grok_key = os.getenv("GROK_API_KEY") or os.getenv("XAI_API_KEY")
+    openrouter_key = os.getenv("OPENROUTER_API_KEY")
 
     has_gemini = bool(gemini_key and gemini_key not in ("your_gemini_api_key", "", None, "]"))
     has_openai = bool(openai_key and openai_key not in ("your_openai_api_key", "", None))
+    has_groq = bool(groq_key and groq_key not in ("your_groq_api_key", "", None))
     has_grok = bool(grok_key and grok_key not in ("your_grok_api_key", "", None))
+    has_openrouter = bool(openrouter_key and openrouter_key not in ("your_openrouter_api_key", "", None))
 
     default_provider = "gemini"
     if has_gemini:
         default_provider = "gemini"
     elif has_openai:
         default_provider = "openai"
+    elif has_groq:
+        default_provider = "groq"
     elif has_grok:
         default_provider = "grok"
+    elif has_openrouter:
+        default_provider = "openrouter"
 
     return {
         "providers": {
             "gemini": has_gemini,
             "openai": has_openai,
-            "grok": has_grok
+            "groq": has_groq,
+            "grok": has_grok,
+            "openrouter": has_openrouter
         },
         "default": default_provider
     }
@@ -193,3 +215,95 @@ def _response_body(result: AnalysisResult) -> dict[str, Any]:
         "explanation": result.explanation,
         "duration_ms": result.duration_ms,
     }
+
+
+@app.post("/analyze-document")
+async def analyze_document(
+    file: UploadFile = File(...),
+    provider: Optional[str] = Form(None)
+) -> dict[str, Any]:
+    """Parse, split, run reproduction pipeline on each claim in a document, and persist results."""
+    try:
+        content = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read uploaded file: {e}")
+
+    from backend.parser import parse_document
+    raw_text = parse_document(content, file.filename or "document.txt")
+    if not raw_text.strip():
+        raise HTTPException(status_code=422, detail="No readable text found in document")
+
+    from backend.splitter import split_document
+    try:
+        bugs = split_document(raw_text, provider)
+    except Exception as e:
+        err_msg = str(e)
+        if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+            raise HTTPException(
+                status_code=429,
+                detail="AI provider rate limit exceeded. Please wait a minute and try again.",
+            )
+        elif "400" in err_msg or "API_KEY_INVALID" in err_msg:
+            raise HTTPException(
+                status_code=400,
+                detail="AI provider API Key is invalid. Please check your .env configuration.",
+            )
+        # Fallback to single bug if splitter fails for other reasons
+        bugs = [{"title": file.filename or "Uploaded Document", "body": raw_text}]
+
+    if not bugs:
+        bugs = [{"title": file.filename or "Uploaded Document", "body": raw_text}]
+
+    results: list[tuple[str, str, AnalysisResult]] = []
+    response_results = []
+    
+    for i, bug in enumerate(bugs, start=1):
+        title = bug.get("title", f"Bug #{i}").strip()
+        body = bug.get("body", "").strip()
+        
+        try:
+            res = run_pipeline(title, body, provider)
+        except Exception as error:
+            err_msg = str(error)
+            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                raise HTTPException(
+                    status_code=429,
+                    detail="AI provider rate limit exceeded. Please wait a minute and try again.",
+                )
+            elif "400" in err_msg or "API_KEY_INVALID" in err_msg:
+                raise HTTPException(
+                    status_code=400,
+                    detail="AI provider API Key is invalid. Please check your .env configuration.",
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Unexpected pipeline error: {err_msg}",
+                )
+
+        results.append((title, body, res))
+        response_results.append({
+            "seq": i,
+            "status": res.status,
+            "explanation": res.explanation
+        })
+
+    from backend.db import persist_document_batch
+    document_id = persist_document_batch(file.filename, raw_text, len(bugs), results)
+
+    return {
+        "document_id": document_id,
+        "bug_count": len(bugs),
+        "results": response_results
+    }
+
+
+@app.get("/documents/{id}")
+def get_document(id: int) -> dict[str, Any]:
+    """Fetch an uploaded document and all its verdicts."""
+    from backend.db import get_document_with_verdicts
+    doc = get_document_with_verdicts(id)
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document with ID {id} not found")
+    return doc
+

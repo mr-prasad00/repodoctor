@@ -8,6 +8,17 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import sys
+import types
+
+if "backend" not in sys.modules:
+    try:
+        import backend
+    except ModuleNotFoundError:
+        _b = types.ModuleType("backend")
+        _b.__path__ = [os.path.dirname(os.path.abspath(__file__))]
+        sys.modules["backend"] = _b
+
 from backend.models import AnalysisResult, PersistedReport
 
 
@@ -99,3 +110,103 @@ def persist_analysis(title: str, body: str, result: AnalysisResult) -> Persisted
             ),
         )
         return PersistedReport(document_id, report_id, int(verdict_cursor.lastrowid))
+
+
+def persist_document_batch(
+    filename: str | None,
+    raw_text: str,
+    bug_count: int,
+    results: list[tuple[str, str, AnalysisResult]]
+) -> int:
+    """Store an uploaded/parsed document, its split reports, and their verdicts."""
+    init_db()
+    with get_connection() as connection:
+        document_cursor = connection.execute(
+            "INSERT INTO documents (filename, raw_text, bug_count) VALUES (?, ?, ?)",
+            (filename, raw_text, bug_count),
+        )
+        document_id = int(document_cursor.lastrowid)
+
+        for seq, (title, body, result) in enumerate(results, start=1):
+            report_cursor = connection.execute(
+                """
+                INSERT INTO reports (document_id, seq, issue_title, issue_body)
+                VALUES (?, ?, ?, ?)
+                """,
+                (document_id, seq, title, body),
+            )
+            report_id = int(report_cursor.lastrowid)
+            connection.execute(
+                """
+                INSERT INTO verdicts (
+                    report_id, status, extracted_json, generated_test, run_output,
+                    explanation, duration_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    report_id,
+                    result.status,
+                    json.dumps(result.extracted) if result.extracted is not None else None,
+                    result.generated_test,
+                    result.run_output,
+                    result.explanation,
+                    result.duration_ms,
+                ),
+            )
+        return document_id
+
+
+def get_document_with_verdicts(document_id: int) -> dict[str, Any] | None:
+    """Retrieve a document and all its reports and verdicts."""
+    init_db()
+    with get_connection() as connection:
+        connection.row_factory = sqlite3.Row
+        doc_row = connection.execute(
+            "SELECT id, filename, raw_text, bug_count, created_at FROM documents WHERE id = ?",
+            (document_id,),
+        )
+        doc = doc_row.fetchone()
+        if not doc:
+            return None
+
+        reports_cursor = connection.execute(
+            """
+            SELECT 
+                r.id as report_id, r.seq, r.issue_title, r.issue_body,
+                v.status, v.extracted_json, v.generated_test, v.run_output,
+                v.explanation, v.duration_ms
+            FROM reports r
+            LEFT JOIN verdicts v ON r.id = v.report_id
+            WHERE r.document_id = ?
+            ORDER BY r.seq ASC
+            """,
+            (document_id,),
+        )
+        reports = []
+        for row in reports_cursor.fetchall():
+            extracted_dict = None
+            if row["extracted_json"]:
+                try:
+                    extracted_dict = json.loads(row["extracted_json"])
+                except Exception:
+                    pass
+            reports.append({
+                "seq": row["seq"],
+                "issue_title": row["issue_title"],
+                "issue_body": row["issue_body"],
+                "status": row["status"],
+                "extracted": extracted_dict,
+                "generated_test": row["generated_test"],
+                "run_output": row["run_output"],
+                "explanation": row["explanation"],
+                "duration_ms": row["duration_ms"],
+            })
+
+        return {
+            "id": doc["id"],
+            "filename": doc["filename"],
+            "raw_text": doc["raw_text"],
+            "bug_count": doc["bug_count"],
+            "created_at": doc["created_at"],
+            "reports": reports,
+        }

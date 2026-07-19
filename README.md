@@ -1,73 +1,109 @@
-# repodoctor
+# RepoDoctor 🩺
 
-Initial repository setup for RepoDoctor.
+RepoDoctor is an agentic AI-powered bug reproduction and verification tool. It automatically analyzes issue reports, extracts structured reproduction claims, generates standalone tests, executes them inside a secure Docker sandbox, and returns a clear, definitive verdict status (`reproduced`, `not_reproducible`, or `insufficient_info`).
 
-## Offline tests
+---
 
-Run the complete local test suite without an OpenAI API key, network access, or
-Docker. OpenAI and Docker are mocked by the tests.
+## 🚀 Live Demo & Deployments
 
-```bash
-python3 -m pip install -r backend/requirements.txt
-python3 -m pytest -q tests/test_offline.py
+- **Frontend (Vercel)**: `https://repodoctor-frontend.vercel.app` (Placeholder)
+- **Backend (Render/Railway)**: `https://repodoctor-backend.up.railway.app` (Placeholder)
+
+---
+
+## ⚙️ How It Works
+
+RepoDoctor operates using a structured 4-step pipeline:
+
+```mermaid
+graph TD
+    A[User pastes Bug Report] --> B[1. LLM Extraction]
+    B --> C[2. pytest Generator]
+    C --> D[3. Secure Docker Sandbox]
+    D --> E[4. Verdict Resolution]
 ```
 
-## Demo reports
+1. **LLM Extraction**: An LLM (Gemini, OpenAI, Groq, Grok, or OpenRouter) extracts the target function, input arguments, expected behavior, and observed failure.
+2. **pytest Generator**: A Python test generator dynamically creates a standalone `test_generated.py` file with exact assertions (including `pytest.raises` for exceptions).
+3. **Secure Sandbox**: The generated test runs inside a highly restricted, read-only Docker container (no network access, non-root user, CPU/RAM caps, and a strict 10s execution timeout).
+4. **Verdict Resolution**: Returns one of three verdicts:
+   - `reproduced`: The code behaves differently than expected (assertion failure).
+   - `not_reproducible`: The test passes and no discrepancy is found.
+   - `insufficient_info`: Missing details, timeouts, or syntax/compilation errors.
 
-To run with Gemini, add your key locally, build the sandbox image from the
-repository root, then start the API:
+---
 
+## 🛠️ Local Development Setup
+
+### Prerequisites
+- Python 3.9+
+- Node.js 18+
+- Docker (running locally)
+
+### 1. Backend Setup
+
+From the root directory:
 ```bash
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install requirements
+pip install -r backend/requirements.txt
+
+# Configure environment variables
+# Copy .env.example or create .env and add your API keys (Gemini, OpenAI, Groq, Grok, or OpenRouter)
 cp .env.example .env
-# Edit .env and set GEMINI_API_KEY to your key.
-# Keep AI_PROVIDER=gemini.
-
-docker build -f sandbox/Dockerfile -t repodoctor-sandbox .
-python3 -m uvicorn backend.main:app --reload
 ```
 
-In a second terminal, start the web UI:
-
+To run sandbox tests locally, you **must build** the restricted sandbox Docker image:
 ```bash
-cd frontend
+docker build -t repodoctor-sandbox -f sandbox/Dockerfile .
+```
+
+Start the FastAPI backend server:
+```bash
+PYTHONPATH=. uvicorn backend.main:app --port 8000 --reload
+```
+
+---
+
+### 2. Frontend Setup
+
+From the `frontend` directory:
+```bash
+# Install dependencies
 npm install
-npm run dev
+
+# Start the Next.js development server
+npm run dev -- -p 3000
 ```
+Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
-Open `http://localhost:3000`, paste a report, and RepoDoctor will display the
-Gemini extraction, generated pytest test, sandbox output, and verdict.
+---
 
-### Report A — reproduced
+## 🐳 Deployment Configurations
 
+### Frontend (Vercel)
+The frontend is pre-configured with [vercel.json](file:///Users/apple/Desktop/repodoctor/frontend/vercel.json) for instant deployment to Vercel:
+1. Connect your repository to Vercel.
+2. Set the root directory to `frontend`.
+3. Configure the following environment variable:
+   - `NEXT_PUBLIC_API_URL`: The public URL of your deployed backend service.
+
+### Backend (Render & Railway)
+The backend includes blueprints for Render ([render.yaml](file:///Users/apple/Desktop/repodoctor/render.yaml)) and Railway ([railway.json](file:///Users/apple/Desktop/repodoctor/railway.json)):
+1. Create a Web Service pointing to the root repository.
+2. Set the startup command to:
+   `PYTHONPATH=. uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
+3. Add the API keys you wish to activate as environment variables (e.g. `GROQ_API_KEY`, `OPENROUTER_API_KEY`, etc.).
+4. **Note:** Since the backend runs test assertions inside local Docker containers, your deployment environment must support **Docker-in-Docker (DinD)** or run on a virtual machine/private server (VPS) with Docker privileges to execute the sandbox loop.
+
+---
+
+## 🧪 Testing the Pipeline
+
+To run the complete offline test suite (mocking Docker and LLMs):
 ```bash
-curl -sS -X POST http://127.0.0.1:8000/analyze \
-  -H 'Content-Type: application/json' \
-  -d '{"title":"get_discount returns wrong value","body":"Calling get_discount(100, 20) returns 120 but it should return 80."}'
+PYTHONPATH=. pytest
 ```
-
-The response has `"status": "reproduced"`.
-
-### Report B — reproduced under the current §9 rule
-
-```bash
-curl -sS -X POST http://127.0.0.1:8000/analyze \
-  -H 'Content-Type: application/json' \
-  -d '{"title":"divide is broken","body":"divide(10, 2) returns 5 but I expected 4."}'
-```
-
-This response has `"status": "reproduced"`: the reporter's stated expected value
-is `4`, while `divide(10, 2)` returns `5`, so the generated expected-behavior test
-fails. This conflicts with the expected Report B status in `PROJECT.md` §17.
-
-To exercise `"status": "not_reproducible"`, use a claim whose expected value matches
-the current code, for example `divide(10, 2) should return 5`.
-
-### Report C — insufficient information
-
-```bash
-curl -sS -X POST http://127.0.0.1:8000/analyze \
-  -H 'Content-Type: application/json' \
-  -d '{"title":"it doesn't work","body":"nothing works please fix"}'
-```
-
-The response has `"status": "insufficient_info"`.

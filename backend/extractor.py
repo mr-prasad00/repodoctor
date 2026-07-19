@@ -50,8 +50,12 @@ def extract(title: str, body: str, provider: str | None = None) -> Extraction:
         content = _extract_with_gemini(prompt)
     elif resolved_provider == "openai":
         content = _extract_with_openai(title, body)
+    elif resolved_provider == "groq":
+        content = _extract_with_groq(title, body)
     elif resolved_provider == "grok":
         content = _extract_with_grok(title, body)
+    elif resolved_provider == "openrouter":
+        content = _extract_with_openrouter(title, body)
     else:
         raise ValueError(f"Unsupported AI provider: {resolved_provider}")
 
@@ -67,7 +71,7 @@ def extract(title: str, body: str, provider: str | None = None) -> Extraction:
 
 
 def _resolve_provider(requested: str | None = None) -> str:
-    """Resolve which AI provider to use, with auto-detection priority (Gemini -> OpenAI -> Grok)."""
+    """Resolve which AI provider to use, with auto-detection priority (Gemini -> OpenAI -> Groq -> Grok -> OpenRouter)."""
     # 1. Check if a specific, configured provider is requested via function call argument
     if requested:
         req = requested.lower()
@@ -75,8 +79,12 @@ def _resolve_provider(requested: str | None = None) -> str:
             return "gemini"
         if req == "openai" and os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_API_KEY") != "your_openai_api_key":
             return "openai"
+        if req == "groq" and os.getenv("GROQ_API_KEY") and os.getenv("GROQ_API_KEY") != "your_groq_api_key":
+            return "groq"
         if req == "grok" and (os.getenv("GROK_API_KEY") or os.getenv("XAI_API_KEY")) and (os.getenv("GROK_API_KEY") or os.getenv("XAI_API_KEY")) != "your_grok_api_key":
             return "grok"
+        if req == "openrouter" and os.getenv("OPENROUTER_API_KEY") and os.getenv("OPENROUTER_API_KEY") != "your_openrouter_api_key":
+            return "openrouter"
 
     # 2. Check if there is an explicit environmental override (like AI_PROVIDER)
     configured = os.getenv("AI_PROVIDER")
@@ -92,9 +100,17 @@ def _resolve_provider(requested: str | None = None) -> str:
     if openai_key and openai_key not in ("your_openai_api_key", "", None):
         return "openai"
 
+    groq_key = os.getenv("GROQ_API_KEY")
+    if groq_key and groq_key not in ("your_groq_api_key", "", None):
+        return "groq"
+
     grok_key = os.getenv("GROK_API_KEY") or os.getenv("XAI_API_KEY")
     if grok_key and grok_key not in ("your_grok_api_key", "", None):
         return "grok"
+
+    openrouter_key = os.getenv("OPENROUTER_API_KEY")
+    if openrouter_key and openrouter_key not in ("your_openrouter_api_key", "", None):
+        return "openrouter"
 
     return "gemini"
 
@@ -132,6 +148,29 @@ def _extract_with_openai(title: str, body: str) -> str | None:
     return response.choices[0].message.content
 
 
+def _extract_with_groq(title: str, body: str) -> str | None:
+    if OpenAI is None:
+        raise RuntimeError("The openai package is required for Groq extraction.")
+
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY is required for Groq extraction.")
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.groq.com/openai/v1",
+    )
+    response = client.chat.completions.create(
+        model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Title: {title}\n\nBody: {body}"},
+        ],
+    )
+    return response.choices[0].message.content
+
+
 def _extract_with_grok(title: str, body: str) -> str | None:
     if OpenAI is None:
         raise RuntimeError("The openai package is required for Grok extraction.")
@@ -140,9 +179,13 @@ def _extract_with_grok(title: str, body: str) -> str | None:
     if not api_key:
         raise RuntimeError("GROK_API_KEY or XAI_API_KEY is required for Grok extraction.")
 
+    # Auto-detect if key is a Groq key (starts with "gsk_") vs Grok (xAI)
+    is_groq = api_key.startswith("gsk_")
+    base_url = "https://api.groq.com/openai/v1" if is_groq else "https://api.x.ai/v1"
+
     client = OpenAI(
         api_key=api_key,
-        base_url="https://api.x.ai/v1",
+        base_url=base_url,
     )
     response = client.chat.completions.create(
         model=os.getenv("GROK_MODEL", "grok-2-1212"),
@@ -153,6 +196,44 @@ def _extract_with_grok(title: str, body: str) -> str | None:
         ],
     )
     return response.choices[0].message.content
+
+
+def _extract_with_openrouter(title: str, body: str) -> str | None:
+    if OpenAI is None:
+        raise RuntimeError("The openai package is required for OpenRouter extraction.")
+
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY is required for OpenRouter extraction.")
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
+        default_headers={
+            "HTTP-Referer": "http://localhost:3000",
+            "X-Title": "RepoDoctor",
+        },
+    )
+    model_name = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+
+    import time
+    for attempt in range(3):
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": f"Title: {title}\n\nBody: {body}"},
+                ],
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            err_msg = str(e)
+            if "429" in err_msg or "rate" in err_msg.lower() or "limit" in err_msg.lower():
+                if attempt < 2:
+                    time.sleep(3)
+                    continue
+            raise e
 
 
 def _normalise(data: dict[str, Any]) -> Extraction:
