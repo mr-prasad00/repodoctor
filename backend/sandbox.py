@@ -74,10 +74,12 @@ def run_test(test_source: str) -> SandboxResult:
             }
         except OSError:
             # Fall back to isolated subprocess pytest if Docker is not available in cloud PaaS containers (e.g. Railway)
-            project_root = str(Path(__file__).resolve().parent.parent)
+            cur_file_dir = os.path.dirname(os.path.abspath(__file__))
+            parent_dir = str(Path(cur_file_dir).parent)
+            
             python_exec = sys.executable or "python3"
             env = os.environ.copy()
-            env["PYTHONPATH"] = project_root
+            env["PYTHONPATH"] = f"{cur_file_dir}:{parent_dir}:."
             
             local_cmd = [
                 python_exec,
