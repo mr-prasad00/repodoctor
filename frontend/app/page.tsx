@@ -20,7 +20,15 @@ type Analysis = {
   duration_ms: number;
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+function getApiUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, "");
+  }
+  if (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+    return "https://repodoctor-production.up.railway.app";
+  }
+  return "http://localhost:8000";
+}
 
 // Pre-scripted reports for easy demo testing
 const DEMO_PRESETS = [
@@ -96,7 +104,7 @@ export default function Home() {
   useEffect(() => {
     async function fetchProviders() {
       try {
-        const response = await fetch(`${API_URL}/providers`);
+        const response = await fetch(`${getApiUrl()}/providers`);
         if (response.ok) {
           const data = await response.json();
           setProviders(data.providers);
@@ -113,7 +121,7 @@ export default function Home() {
   useEffect(() => {
     async function checkHealth() {
       try {
-        const res = await fetch(`${API_URL}/health`);
+        const res = await fetch(`${getApiUrl()}/health`);
         setApiOnline(res.ok);
       } catch (e) {
         setApiOnline(false);
@@ -131,7 +139,7 @@ export default function Home() {
     setResult(null);
 
     try {
-      const response = await fetch(`${API_URL}/analyze`, {
+      const response = await fetch(`${getApiUrl()}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, body, provider: selectedProvider }),
