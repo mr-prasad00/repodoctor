@@ -13,14 +13,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-if "backend" not in sys.modules:
-    try:
-        import backend
-    except ModuleNotFoundError:
-        _b = types.ModuleType("backend")
-        _b.__path__ = [os.path.dirname(os.path.abspath(__file__))]
-        sys.modules["backend"] = _b
-
 cur_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = str(Path(cur_dir).parent)
 if cur_dir not in sys.path:
@@ -30,12 +22,20 @@ if parent_dir not in sys.path:
 
 load_dotenv(Path(cur_dir).parent / ".env")
 
-from backend.db import init_db, persist_analysis
-from backend.extractor import extract
-from backend.models import AnalysisResult
-from backend.sandbox import run_test
-from backend.test_generator import generate_test
-from backend.verdict import decide_verdict
+try:
+    from backend.db import init_db, persist_analysis
+    from backend.extractor import extract
+    from backend.models import AnalysisResult
+    from backend.sandbox import run_test
+    from backend.test_generator import generate_test
+    from backend.verdict import decide_verdict
+except ModuleNotFoundError:
+    from db import init_db, persist_analysis
+    from extractor import extract
+    from models import AnalysisResult
+    from sandbox import run_test
+    from test_generator import generate_test
+    from verdict import decide_verdict
 
 
 app = FastAPI(title="RepoDoctor")
@@ -228,12 +228,20 @@ async def analyze_document(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read uploaded file: {e}")
 
-    from backend.parser import parse_document
+    try:
+        from backend.parser import parse_document
+    except ModuleNotFoundError:
+        from parser import parse_document
+
     raw_text = parse_document(content, file.filename or "document.txt")
     if not raw_text.strip():
         raise HTTPException(status_code=422, detail="No readable text found in document")
 
-    from backend.splitter import split_document
+    try:
+        from backend.splitter import split_document
+    except ModuleNotFoundError:
+        from splitter import split_document
+
     try:
         bugs = split_document(raw_text, provider)
     except Exception as e:
@@ -288,7 +296,11 @@ async def analyze_document(
             "explanation": res.explanation
         })
 
-    from backend.db import persist_document_batch
+    try:
+        from backend.db import persist_document_batch
+    except ModuleNotFoundError:
+        from db import persist_document_batch
+
     document_id = persist_document_batch(file.filename, raw_text, len(bugs), results)
 
     return {
@@ -301,7 +313,11 @@ async def analyze_document(
 @app.get("/documents/{id}")
 def get_document(id: int) -> dict[str, Any]:
     """Fetch an uploaded document and all its verdicts."""
-    from backend.db import get_document_with_verdicts
+    try:
+        from backend.db import get_document_with_verdicts
+    except ModuleNotFoundError:
+        from db import get_document_with_verdicts
+
     doc = get_document_with_verdicts(id)
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document with ID {id} not found")

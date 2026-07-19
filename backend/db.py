@@ -8,18 +8,10 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-import sys
-import types
-
-if "backend" not in sys.modules:
-    try:
-        import backend
-    except ModuleNotFoundError:
-        _b = types.ModuleType("backend")
-        _b.__path__ = [os.path.dirname(os.path.abspath(__file__))]
-        sys.modules["backend"] = _b
-
-from backend.models import AnalysisResult, PersistedReport
+try:
+    from backend.models import AnalysisResult, PersistedReport
+except ModuleNotFoundError:
+    from models import AnalysisResult, PersistedReport
 
 
 DEFAULT_DATABASE_PATH = Path(__file__).with_name("repodoctor.db")
